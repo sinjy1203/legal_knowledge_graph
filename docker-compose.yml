@@ -1,0 +1,18 @@
+services:
+  neo4j:
+    container_name: neo4j_legal
+    image: neo4j:5.22.0
+    ports:
+      - 7474:7474	# for browser console
+      - 7687:7687	# for db
+    volumes:
+      - ./neo4j:/data		## volume mount
+      - ./neo4j.conf:/conf/neo4j.conf
+      - ./apoc.conf:/conf/apoc.conf
+    environment:
+      NEO4J_AUTH: neo4j/sinjy1203
+      NEO4J_PLUGINS: '["graph-data-science", "apoc"]'  # GDS와 APOC 플러그인 설치
+      NEO4J_dbms_security_procedures_unrestricted: "gds.*,apoc.*,vector.*"  # 프로시저 권한 설정
+      NEO4J_apoc_export_file_enabled: "true"
+      NEO4J_apoc_import_file_enabled: "true"
+      NEO4J_apoc_import_file_use__neo4j__config: "true"
