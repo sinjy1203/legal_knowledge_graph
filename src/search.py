@@ -26,7 +26,7 @@ agent = ReactAgent(
 
 
 async def main():
-    input = State(messages=[HumanMessage(content="Consider the Acquisition Agreement between Parent \"Magic AcquireCo, Inc.\" and Target \"The Michaels Companies, Inc.\"; What is the Type of Consideration")])    
+    input = State(messages=[HumanMessage(content="Consider the Acquisition Agreement between Parent \"SUPERNUS PHARMACEUTICALS, INC.\" and Target \"ADAMAS PHARMACEUTICALS, INC.\"; What is the Type of Consideration")])    
     config = {
         "configurable": {
             "max_execute_tool_count": 5

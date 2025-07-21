@@ -29,7 +29,7 @@ class ReactAgent:
         self.graph = workflow.compile()
 
     async def llm(self, state, config):
-        system_template = SYSTEM_TEMPLATE.format(graph_database_scheam=self.graph_schema)
+        system_template = SYSTEM_TEMPLATE.format(graph_database_schema=self.graph_schema)
             
         prompt = ChatPromptTemplate.from_messages(
             [
