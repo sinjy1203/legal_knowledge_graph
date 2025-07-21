@@ -14,13 +14,3 @@ class State:
     benchmark_name: str = field(default="")
     documents: list[Document] = field(default_factory=list)
     chunks: list[Chunk] = field(default_factory=list)
-
-
-
-
-    # items: list[dict] = field(default_factory=list)
-    # responses: list[dict] = field(default_factory=list)
-    # start_date: Optional[str] = None  # "YYYY-MM-DD" 형식의 문자열
-    # end_date: Optional[str] = None    # "YYYY-MM-DD" 형식의 문자열
-    # tables: List[str] = field(default_factory=lambda: ["news", "market_news", "sec", "earnings_call"])
-    # clear_database: bool = False  # 데이터베이스 초기화 여부
