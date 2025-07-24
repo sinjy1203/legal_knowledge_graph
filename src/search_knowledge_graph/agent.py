@@ -19,7 +19,7 @@ class ReactAgent:
         llm = ChatOpenAI(**model_kwargs)
         self.llm_with_tools = llm.bind_tools(tools)
         self.tools_by_name = {tool.name: tool for tool in tools}
-        self.graph_schema = graph_schema
+        self.graph_schema = json.dumps(graph_schema, indent=2, ensure_ascii=False)
 
         workflow = StateGraph(State, Config)
         workflow.add_node("llm", self.llm)
