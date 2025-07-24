@@ -1,0 +1,3 @@
+[submodule "src/legalbenchrag"]
+	path = src/legalbenchrag
+	url = https://github.com/zeroentropy-ai/legalbenchrag.git
