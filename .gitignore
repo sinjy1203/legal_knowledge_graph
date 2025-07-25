@@ -19,3 +19,5 @@ neo4j/
 data/
 
 logs/
+
+.cursorignore
