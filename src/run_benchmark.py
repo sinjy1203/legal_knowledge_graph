@@ -102,7 +102,7 @@ def load_data():
         all_tests.extend(tests)
 
     return Benchmark(
-        tests=all_tests[:2],
+        tests=all_tests,
     )
 
 
