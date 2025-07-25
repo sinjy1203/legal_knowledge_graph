@@ -1,13 +1,14 @@
 import os
 import random
 import json
+from tqdm.auto import tqdm
 from datetime import datetime
 from dotenv import load_dotenv
 import asyncio
 from langchain_core.messages import HumanMessage
+from langfuse.langchain import CallbackHandler
 from search_knowledge_graph import agent
 from search_knowledge_graph.state import State
-from generate_knowledge_graph.utils.callback import BatchCallback
 
 from legalbenchrag.legalbenchrag.benchmark_types import (
     QueryResponse,
@@ -23,40 +24,55 @@ BENCHMARK_NAME = "maud"
 BENCHMARK_RESULT_DIR = "./data/benchmark_results"
 
 
-async def pred(queries):
-    with BatchCallback(len(queries)) as cb:
-        states = [State(messages=[HumanMessage(content=query)]) for query in queries]
-        config = {
-            "max_concurrency": 4,
-            "callbacks": [cb],
-            "configurable": {
-                "max_execute_tool_count": 10
+async def pred(benchmark):
+    progress_bar = tqdm(total=len(benchmark.tests), desc="searching...")
+    langfuse_handler = CallbackHandler()
+
+    states = []
+    configs = []
+    for test_data in benchmark.tests:
+        states.append(State(messages=[HumanMessage(content=test_data.query)]))
+        configs.append(
+            {
+                "max_concurrency": 8,
+                "callbacks": [langfuse_handler],
+                "metadata": {
+                    "benchmark": BENCHMARK_NAME,
+                    "query": test_data.query,
+                    "snippets": [snippet.model_dump() for snippet in test_data.snippets],
+                },
+                "configurable": {
+                    "max_execute_tool_count": 10,
+                    "progress_bar": progress_bar,
+                }
             }
-        }
-        responses = await agent.abatch(states, config)
-
-    results = []
-    for res in responses:
-        retrieved_snippets: list[RetrievedSnippet] = []
-        if res['messages'][-1].type == "ai":
-            pass
-        else:
-            for i, chunk_info in enumerate(json.loads(res['messages'][-1].content)):
-                retrieved_snippets.append(
-                    RetrievedSnippet(
-                        file_path=chunk_info['file_path'],
-                        span=chunk_info['span'],
-                        score=1.0 / (i + 1)
-                    )
-                )
-
-        results.append(
-            QueryResponse(
-                retrieved_snippets=retrieved_snippets
-            )
         )
     
-    return results
+    responses = await agent.abatch(states, configs)
+    progress_bar.close()
+
+    qa_results = []
+    for test_data, response in zip(benchmark.tests, responses):
+        retrieved_snippets = []
+        if response['messages'][-1].type == "ai":
+            pass
+        else:
+            for i, chunk_info in enumerate(json.loads(response['messages'][-1].content)):
+                retrieved_snippets.append(
+                    {
+                        "file_path": chunk_info['file_path'],
+                        "span": chunk_info['span'],
+                        "score": 1.0 / (i + 1)
+                    }
+                )
+
+        qa_results.append(
+            QAResult(
+                qa_gt=test_data.model_dump(),
+                retrieved_snippets=retrieved_snippets,
+            )
+        )
+    return BenchmarkResult(qa_result_list=qa_results, weights=[1.0] * len(responses))
 
 
 def load_data():
@@ -86,19 +102,14 @@ def load_data():
         all_tests.extend(tests)
 
     return Benchmark(
-        tests=all_tests,
+        tests=all_tests[:2],
     )
 
 
 
 async def main():
     benchmark = load_data()
-    results = await pred([test.query for test in benchmark.tests])
-    qa_results = [QAResult(qa_gt=test.model_dump(), retrieved_snippets=result.model_dump()["retrieved_snippets"]) for test, result in zip(benchmark.tests, results)]
-    benchmark_result = BenchmarkResult(
-        qa_result_list=qa_results,
-        weights=[1.0] * len(results),
-    )
+    benchmark_result = await pred(benchmark)
 
     result_path = f"{BENCHMARK_RESULT_DIR}/{datetime.now().strftime('%Y%m%d_%H%M%S')}"
     os.makedirs(result_path, exist_ok=True)

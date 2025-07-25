@@ -24,6 +24,7 @@ class ReactAgent:
         workflow = StateGraph(State, Config)
         workflow.add_node("llm", self.llm)
         workflow.add_node("execute_tool", self.execute_tool)
+        workflow.add_node("end", self.end)
 
         workflow.add_edge(START, "llm")
         self.graph = workflow.compile()
@@ -47,13 +48,13 @@ class ReactAgent:
                 >= config["configurable"]["max_execute_tool_count"]
             ):
                 update = {"messages": [AIMessage(content="도구 실행 횟수를 초과했습니다.")]}
-                goto = END
+                goto = "end"
             else:
                 update = {"messages": [response]}
                 goto = "execute_tool"
         else:
             update = {"messages": [AIMessage(content=response.content)]}
-            goto = END
+            goto = "end"
 
         return Command(update=update, goto=goto)
 
@@ -81,8 +82,13 @@ class ReactAgent:
             "execute_tool_count": state.execute_tool_count + 1,
         }
         if outputs[-1].name == "get_chunk_info":
-            goto = "__end__"
+            goto = "end"
         else:
             goto = "llm"
 
         return Command(update=update, goto=goto) 
+    
+    async def end(self, state, config):
+        if config["configurable"]["progress_bar"]:
+            config["configurable"]["progress_bar"].update(1)
+        return Command(goto=END)
