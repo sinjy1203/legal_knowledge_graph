@@ -80,6 +80,9 @@ class ReactAgent:
             "messages": outputs,
             "execute_tool_count": state.execute_tool_count + 1,
         }
-        goto = "llm"
+        if outputs[-1].name == "get_chunk_info":
+            goto = "__end__"
+        else:
+            goto = "llm"
 
         return Command(update=update, goto=goto) 

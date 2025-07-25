@@ -357,6 +357,7 @@ source = { virtual = "." }
 dependencies = [
     { name = "langchain-openai" },
     { name = "langgraph" },
+    { name = "legalbenchrag" },
     { name = "neo4j" },
     { name = "python-dotenv" },
     { name = "scikit-learn" },
@@ -366,10 +367,16 @@ dependencies = [
 requires-dist = [
     { name = "langchain-openai", specifier = ">=0.3.27" },
     { name = "langgraph", specifier = ">=0.5.1" },
+    { name = "legalbenchrag", editable = "src/legalbenchrag" },
     { name = "neo4j", specifier = ">=5.28.1" },
     { name = "python-dotenv", specifier = ">=1.1.1" },
     { name = "scikit-learn", specifier = ">=1.7.0" },
 ]
+
+[[package]]
+name = "legalbenchrag"
+version = "0.1"
+source = { editable = "src/legalbenchrag" }
 
 [[package]]
 name = "neo4j"

@@ -1,8 +1,11 @@
 import os
+from dotenv import load_dotenv
 from langchain_openai import OpenAIEmbeddings
 from neo4j import GraphDatabase
 from .agent import ReactAgent
 from .tools import *
+
+load_dotenv(override=True)
 
 
 embedding_model = OpenAIEmbeddings(
