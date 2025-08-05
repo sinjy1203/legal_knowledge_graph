@@ -4,7 +4,9 @@ from collections.abc import Sequence
 from pydantic import BaseModel, model_validator, computed_field
 from logger import setup_logger
 from langgraph.types import Command
+from langgraph.runtime import Runtime
 from generate_knowledge_graph.utils.model import Document
+from generate_knowledge_graph.state import ContextSchema
 
 
 MAX_TESTS_PER_BENCHMARK = 194
@@ -54,13 +56,13 @@ class Benchmark(BaseModel):
 
 
 class DataLoader:
-    def __call__(self, state):
+    def __call__(self, state, runtime: Runtime[ContextSchema]):
         logger.info("Loading data...")
         
         all_tests: list[QAGroundTruth] = []
         document_file_paths_set: set[str] = set()
         used_document_file_paths_set: set[str] = set()
-        with open(f"./data/benchmarks/{state.benchmark_name}.json", encoding="utf-8") as f:
+        with open(f"./data/benchmarks/{runtime.context.benchmark_name}.json", encoding="utf-8") as f:
             benchmark = Benchmark.model_validate_json(f.read())
             tests = benchmark.tests
             document_file_paths_set |= {
@@ -79,7 +81,7 @@ class DataLoader:
                 snippet.file_path for test in tests for snippet in test.snippets
             }
             for test in tests:
-                test.tags = [state.benchmark_name]
+                test.tags = [runtime.context.benchmark_name]
             all_tests.extend(tests)
         
 

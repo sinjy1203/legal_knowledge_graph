@@ -3,24 +3,26 @@ from typing_extensions import Self
 from collections.abc import Sequence
 from pydantic import BaseModel, model_validator, computed_field
 from logger import setup_logger
+from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langgraph.types import Command
+from langgraph.runtime import Runtime
+
 from generate_knowledge_graph.utils.model import Chunk
+from generate_knowledge_graph.state import ContextSchema
 
-
-CHUNK_SIZE = 500
 
 logger = setup_logger()
 
 
 class Chunker:
-    def __call__(self, state):
+    def __call__(self, state, runtime: Runtime[ContextSchema]):
         logger.info("chunking data...")
         
         chunks: list[Chunk] = []
         for document in state.documents:
             text_splits: list[str] = []
-            for i in range(0, len(document.content), CHUNK_SIZE):
-                text_splits.append(document.content[i : i + CHUNK_SIZE])
+            for i in range(0, len(document.content), runtime.context.chunk_size):
+                text_splits.append(document.content[i : i + runtime.context.chunk_size])
 
             # Get spans from chunks
             prev_span: tuple[int, int] | None = None

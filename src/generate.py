@@ -1,14 +1,18 @@
 import os
 from dotenv import load_dotenv
 from generate_knowledge_graph.builder import graph
-from generate_knowledge_graph.state import State, Config
+from langfuse.langchain import CallbackHandler
+
 
 load_dotenv(override=True)
 
 
 def main():
-    input = State(benchmark_name="maud", clear_database=True)    
-    _ = graph.invoke(input)
+    langfuse_handler = CallbackHandler()
+    input = {}
+    context = {}
+    config = {"callbacks": [langfuse_handler], "metadata": {"langfuse_tags": ["generate"]}}
+    _ = graph.invoke(input, context=context, config=config)
 
 if __name__ == "__main__":
     main()

@@ -2,7 +2,7 @@ import os
 from dotenv import load_dotenv
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 from langgraph.graph import StateGraph
-from generate_knowledge_graph.state import State, Config
+from generate_knowledge_graph.state import State, ContextSchema
 from generate_knowledge_graph.nodes import *
 from generate_knowledge_graph.utils.database import Neo4jConnection
 
@@ -30,7 +30,7 @@ neo4j_client = Neo4jConnection(
 )
 
 # 워크플로우 생성
-workflow = StateGraph(State, Config)
+workflow = StateGraph(State, context_schema=ContextSchema)
 
 # 노드 추가
 workflow.add_node("DataLoader", DataLoader())
