@@ -10,7 +10,7 @@ load_dotenv(override=True)
 def main():
     langfuse_handler = CallbackHandler()
     input = {}
-    context = {}
+    context = {"chunking_strategy": "rcts"}
     config = {"callbacks": [langfuse_handler], "metadata": {"langfuse_tags": ["generate"]}}
     _ = graph.invoke(input, context=context, config=config)
 

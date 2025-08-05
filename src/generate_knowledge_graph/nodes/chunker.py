@@ -20,10 +20,24 @@ class Chunker:
         
         chunks: list[Chunk] = []
         for document in state.documents:
-            text_splits: list[str] = []
-            for i in range(0, len(document.content), runtime.context.chunk_size):
-                text_splits.append(document.content[i : i + runtime.context.chunk_size])
-
+            if runtime.context.chunking_strategy == "naive":
+                text_splits: list[str] = []
+                for i in range(0, len(document.content), runtime.context.chunk_size):
+                    text_splits.append(document.content[i : i + runtime.context.chunk_size])
+            elif runtime.context.chunking_strategy == "rcts":
+                synthetic_data_splitter = RecursiveCharacterTextSplitter(
+                    separators=[
+                        "________________",
+                        "\n\n",
+                        "\n"
+                    ],
+                    chunk_size=runtime.context.chunk_size,
+                    chunk_overlap=0,
+                    length_function=len,
+                    is_separator_regex=False,
+                    strip_whitespace=False,
+                )
+                text_splits = synthetic_data_splitter.split_text(document.content)
             # Get spans from chunks
             prev_span: tuple[int, int] | None = None
             for text_split in text_splits:
@@ -42,7 +56,7 @@ class Chunker:
         
         return Command(
             update={
-                "chunks": chunks
+                "chunks": chunks[:10]
             },
             goto="EntityRelationExtractor"
         )
