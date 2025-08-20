@@ -92,6 +92,9 @@ class DataLoader:
         # Create corpus (sorted for consistent processing)
         corpus: list[Document] = []
         for document_file_path in sorted(used_document_file_paths_set):
+            # if document_file_path != "maud/TIFFANY_&_CO._LVMH_MOËT_HENNESSY-LOUIS_VUITTON.txt" and document_file_path != "maud/Adamas_Pharmaceuticals_Supernus_Pharmaceuticals.txt":
+            # if document_file_path != "maud/TIFFANY_&_CO._LVMH_MOËT_HENNESSY-LOUIS_VUITTON.txt":
+            #     continue
             with open(f"./data/corpus/{document_file_path}", encoding="utf-8") as f:
                 corpus.append(
                     Document(
@@ -106,5 +109,5 @@ class DataLoader:
             update={
                 "documents": corpus
             },
-            goto="Chunker"
+            goto="IntroBodySeparator"
         )

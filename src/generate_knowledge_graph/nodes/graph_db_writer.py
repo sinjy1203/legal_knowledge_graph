@@ -29,13 +29,12 @@ class GraphDBWriter:
             self.neo4j_client.setup_vector_indexes()
         
         logger.info("Neo4j 그래프 데이터베이스에 데이터 저장 중...")
-    
-        self.neo4j_client.create_nodes_and_relationships(state.chunks)      
+
+        self.neo4j_client.create_nodes_and_relationships(state.chunks, state.hierarchical_chunk_ids)
         self.neo4j_client.close()
         
         logger.info("Neo4j 그래프 데이터베이스에 데이터 저장 완료")
         return Command(
             update={},
-            goto="EntityResolver"
+            goto="__end__"
         )
-

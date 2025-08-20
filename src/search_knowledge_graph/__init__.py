@@ -18,8 +18,6 @@ neo4j_driver = GraphDatabase.driver(
     auth=(os.getenv("NEO4J_USER"), os.getenv("NEO4J_PASSWORD"))
 )
 
-final_tool = GetChunkInfoTool(neo4j_driver)
-
 agent = ReactAgent(
     model_kwargs={
         "base_url": os.getenv("LLM_BASE_URL"),
@@ -28,11 +26,10 @@ agent = ReactAgent(
         "api_key": "dummy"
     },
     tools=[
-        SearchEntityTool(neo4j_driver, embedding_model),
-        GetMentionChunkTool(neo4j_driver),
-        SearchRelationshipTool(neo4j_driver, embedding_model),
-        SearchConnectedEntityTool(neo4j_driver, embedding_model),
-        final_tool
-    ],
-    graph_schema=final_tool.graph_schema
+        SearchCorpusTool(neo4j_driver),
+        SearchArticleTool(neo4j_driver, embedding_model),
+        SearchSectionTool(neo4j_driver, embedding_model),
+        SearchChunkTool(neo4j_driver, embedding_model),
+        ResponseTool(neo4j_driver)
+    ]
 )

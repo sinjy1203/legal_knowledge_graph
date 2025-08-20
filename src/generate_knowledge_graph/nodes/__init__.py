@@ -1,7 +1,9 @@
 from .data_loader import DataLoader
 from .chunker import Chunker
-from .entity_relation_extractor import EntityRelationExtractor
+from .document_structure_detector import DocumentStructureDetector
 from .graph_db_writer import GraphDBWriter
-from .entity_resolver import EntityResolver
+from .summarizer import Summarizer
+from .table_of_contents_extractor import TableOfContentsExtractor
+from .intro_body_separator import IntroBodySeparator
 
-__all__ = ["DataLoader", "Chunker", "EntityRelationExtractor", "GraphDBWriter", "EntityResolver"]
+__all__ = ["DataLoader", "Chunker", "DocumentStructureDetector", "GraphDBWriter", "Summarizer", "TableOfContentsExtractor", "IntroBodySeparator"]

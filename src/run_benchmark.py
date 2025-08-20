@@ -28,10 +28,22 @@ async def pred(benchmark):
     progress_bar = tqdm(total=len(benchmark.tests), desc="searching...")
     langfuse_handler = CallbackHandler()
 
-    states = []
+    inputs = []
+    context = {
+        "max_execute_tool_count": 10,
+        "progress_bar": progress_bar,
+    }
     configs = []
     for test_data in benchmark.tests:
-        states.append(State(messages=[HumanMessage(content=test_data.query)]))
+        inputs.append(
+            {
+                "messages": [
+                    HumanMessage(
+                        content=test_data.query
+                    )
+                ]
+            }
+        )
         configs.append(
             {
                 "max_concurrency": 8,
@@ -40,15 +52,12 @@ async def pred(benchmark):
                     "benchmark": BENCHMARK_NAME,
                     "query": test_data.query,
                     "snippets": [snippet.model_dump() for snippet in test_data.snippets],
-                },
-                "configurable": {
-                    "max_execute_tool_count": 10,
-                    "progress_bar": progress_bar,
+                    "langfuse_tags": ["benchmark"],
                 }
             }
         )
     
-    responses = await agent.abatch(states, configs)
+    responses = await agent.abatch(inputs, context=context, config=configs)
     progress_bar.close()
 
     qa_results = []
