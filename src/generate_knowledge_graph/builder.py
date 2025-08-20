@@ -2,7 +2,7 @@ import os
 from dotenv import load_dotenv
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 from langgraph.graph import StateGraph
-from generate_knowledge_graph.state import State, Config
+from generate_knowledge_graph.state import State, ContextSchema
 from generate_knowledge_graph.nodes import *
 from generate_knowledge_graph.utils.database import Neo4jConnection
 
@@ -12,8 +12,8 @@ load_dotenv(override=True)
 llm = ChatOpenAI(
     base_url=os.getenv("LLM_BASE_URL"),
     model=os.getenv("LLM_MODEL"),
-    temperature=0.1,
-    api_key="dummy"
+    temperature=0.0,
+    api_key=os.getenv("LLM_API_KEY")
 )
 embedding_model = OpenAIEmbeddings(
     base_url=os.getenv("EMBEDDING_BASE_URL"),
@@ -30,14 +30,17 @@ neo4j_client = Neo4jConnection(
 )
 
 # 워크플로우 생성
-workflow = StateGraph(State, Config)
+workflow = StateGraph(State, context_schema=ContextSchema)
 
 # 노드 추가
 workflow.add_node("DataLoader", DataLoader())
+workflow.add_node("IntroBodySeparator", IntroBodySeparator(llm))
+workflow.add_node("TableOfContentsExtractor", TableOfContentsExtractor(llm))
 workflow.add_node("Chunker", Chunker())
-workflow.add_node("EntityRelationExtractor", EntityRelationExtractor(llm))
+workflow.add_node("DocumentStructureDetector", DocumentStructureDetector(llm))
+workflow.add_node("Summarizer", Summarizer(llm))
 workflow.add_node("GraphDBWriter", GraphDBWriter(neo4j_client))
-workflow.add_node("EntityResolver", EntityResolver(neo4j_client, llm))
+
 
 # 엣지 추가
 workflow.add_edge("__start__", "DataLoader")

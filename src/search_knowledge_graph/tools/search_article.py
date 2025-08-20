@@ -7,23 +7,23 @@ from langchain_core.callbacks import (
     CallbackManagerForToolRun,
 )
 
-class SearchEntityInput(BaseModel):
-    entity_type: str = Field(
-        description="Entity type to search - must be one of Node types in the graph database schema"
+class SearchArticleInput(BaseModel):
+    corpus_id: str = Field(
+        description="Corpus ID to search"
     )
-    entity_name: str = Field(
-        description="Entity name to search"
+    query: str = Field(
+        description="Query to search"
     )
 
 
-class SearchEntityTool(BaseTool):
-    name: str = "search_entity"
+class SearchArticleTool(BaseTool):
+    name: str = "SearchArticleTool"
     description: str = (
-        "This is a tool for searching entities in a graph database that are similar to a given entity name."
-        "Purpose: To find the actual entities stored in the graph database based on the entity name mentioned in the user's question."
-        "return_schema: [{'id': 'entity_id1'}, {'id': 'entity_id2'}, ...]"
+        "This tool searches Article nodes within a specific Corpus by semantic similarity to the query. "
+        "Purpose: Given a corpus_id and a natural-language query, return the most relevant Articles. "
+        "return_schema: [{‘id’: article_id, ‘name’: article_name, ‘summary’: article_summary}, …]"
     )
-    args_schema: Type[BaseModel] = SearchEntityInput
+    args_schema: Type[BaseModel] = SearchArticleInput
     return_direct: bool = False
 
     # 필요한 의존성 주입
@@ -33,11 +33,11 @@ class SearchEntityTool(BaseTool):
     similarity_threshold: float = 0.0
 
     CYPHER_QUERY: ClassVar[str] = """
-    MATCH (e:{entity_type})
-    WHERE e.vector IS NOT NULL
-    WITH e, gds.similarity.cosine(e.vector, $query_vector) AS score
+    MATCH (co:Corpus {id: $corpus_id})-[:CHILD]->(a:Article)
+    WHERE a.vector IS NOT NULL
+    WITH a, gds.similarity.cosine(a.vector, $query_vector) AS score
     WHERE score > $similarity_threshold
-    RETURN e.id AS id
+    RETURN a.id AS id, a.name AS name, a.summary AS summary
     ORDER BY score DESC
     LIMIT $top_k
     """
@@ -51,27 +51,27 @@ class SearchEntityTool(BaseTool):
         )
 
     def _run(
-        self, 
-        entity_type: str, 
-        entity_name: str, 
-        run_manager: Optional[CallbackManagerForToolRun] = None
+        self,
+        corpus_id: str,
+        query: str,
+        run_manager: Optional[CallbackManagerForToolRun] = None,
     ) -> str:
         with self.neo4j_driver.session() as session:
-            cypher_query = self.CYPHER_QUERY.format(entity_type=entity_type)
             params = {
-                "query_vector": self.embedding_model.embed_query(entity_name),
+                "corpus_id": corpus_id,
+                "query_vector": self.embedding_model.embed_query(query),
                 "similarity_threshold": self.similarity_threshold,
                 "top_k": self.top_k
             }
             
-            results = session.run(cypher_query, params)
+            results = session.run(self.CYPHER_QUERY, params)
             dict_results = [record.data() for record in results]
             return dict_results
 
     async def _arun(
         self, 
-        entity_type: str, 
-        entity_name: str, 
+        corpus_id: str,
+        query: str,
         run_manager: Optional[AsyncCallbackManagerForToolRun] = None
     ) -> str:
-        return self._run(entity_type, entity_name)
+        return self._run(corpus_id, query)

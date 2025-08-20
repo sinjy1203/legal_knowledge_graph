@@ -1,13 +1,15 @@
 from dataclasses import dataclass, field
 from typing import Annotated, Optional
+from tqdm.auto import tqdm
 
 
 def custom_add_messages(existing: list, update: list):
     return existing + update
 
 @dataclass
-class Config:
+class ContextSchema:
     max_execute_tool_count: int = field(default=5)
+    progress_bar: tqdm = field(default=None)
 
 @dataclass
 class State:

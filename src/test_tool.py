@@ -18,19 +18,19 @@ neo4j_driver = GraphDatabase.driver(
     auth=(os.getenv("NEO4J_USER"), os.getenv("NEO4J_PASSWORD"))
 )
 
-# tool = SearchEntityTool(neo4j_driver, embedding_model)
-# result = tool.invoke({"entity_type": "MaterialAdverseEffectDefinition", "entity_name": "parent material"})
+# tool = SearchCorpusTool(neo4j_driver)
+# result = tool.invoke({})
 
-# tool = GetMentionChunkTool(neo4j_driver)
-# result = tool.invoke({"entity_id": "Company", "entity_type": "TargetCompany"})
+# tool = SearchArticleTool(neo4j_driver, embedding_model)
+# result = tool.invoke({"corpus_id": "a4346665-4dce-4aab-97f8-e1dbe089f10e", "query": "term description"})
 
-# tool = SearchRelationshipTool(neo4j_driver, embedding_model)
-# result = tool.invoke({"relationship_type": "Acquires", "query": "Merger Consideration"})
+# tool = SearchSectionTool(neo4j_driver, embedding_model)
+# result = tool.invoke({"article_id": "62f11699-1452-44a1-8b33-1c18951e5007", "query": "Affiliate description"})
 
-# tool = SearchConnectedEntityTool(neo4j_driver, embedding_model)
-# result = tool.invoke({"entity_id": "Parent", "entity_type": "Acquirer", "relationship_type": "Pays", "relationship_direction": "outgoing", "query": "Consideration"})
+# tool = SearchChunkTool(neo4j_driver, embedding_model)
+# result = tool.invoke({"section_id": "df745afb-79d3-42d4-8b93-fabe4a888b7d", "query": "Affiliate description"})
 
-tool = GetChunkInfoTool(neo4j_driver)
-result = tool.invoke({"chunk_ids": ["6be78fb3-a50d-476d-b4c0-784138dff93e", "bb047214-fa64-4de0-b4fe-0fb68ed95ced"]})
+tool = ResponseTool(neo4j_driver)
+result = tool.invoke({"chunk_ids": ["a088e71d-6fcd-42a1-b281-35075fc44c00", "4281ea0d-4e84-4da8-aeef-0c714596f0d7"]})
 
 print(json.dumps(result, indent=4))
