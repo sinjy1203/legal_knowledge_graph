@@ -110,6 +110,7 @@ class Neo4jConnection:
             for file_path, articles in hierarchical_chunk_ids.items():
                 corpus_name = (file_path.split("/")[-1] if file_path else "")
                 corpus_id = str(uuid4())
+                corpus_contents: list[str] = []
 
                 # Corpus 노드 생성 및 속성 설정
                 session.run(
@@ -160,6 +161,8 @@ class Neo4jConnection:
                         },
                     )
 
+                    # 누적할 아티클 콘텐츠 버퍼
+                    article_contents: list[str] = []
                     for section_name, section_value in sections.items():
                         # Skip article-level summary key
                         if section_name == "summary":
@@ -172,16 +175,25 @@ class Neo4jConnection:
                         else:
                             chunk_idx_list = section_value
                             section_summary = None
+                        # 섹션 콘텐츠 생성: 청크들의 content를 "\n\n"으로 연결
+                        section_chunk_texts: list[str] = []
+                        if isinstance(chunk_idx_list, (list, tuple)):
+                            for idx in chunk_idx_list:
+                                if isinstance(idx, int) and 0 <= idx < len(chunks):
+                                    section_chunk_texts.append(chunks[idx].content)
+                        section_content_str = "\n\n".join(section_chunk_texts)
                         session.run(
                             """
                             MERGE (s:Section {id: $section_id})
                             SET s.name = $section_name
                             SET s.summary = $section_summary
+                            SET s.content = $section_content
                             """,
                             {
                                 "section_id": section_id,
                                 "section_name": section_name,
                                 "section_summary": section_summary,
+                                "section_content": section_content_str,
                             },
                         )
 
@@ -258,6 +270,32 @@ class Neo4jConnection:
                                         """,
                                         {"prev_id": prev_chunk_id, "cur_id": chunk_id},
                                     )
+
+                        # 아티클 콘텐츠에 섹션 콘텐츠 추가
+                        article_contents.append(section_content_str)
+
+                    # 아티클 콘텐츠 저장 (섹션 콘텐츠들을 "\n\n"으로 연결)
+                    article_content_str = "\n\n".join([t for t in article_contents if t])
+                    session.run(
+                        """
+                        MATCH (a:Article {id: $article_id})
+                        SET a.content = $article_content
+                        """,
+                        {"article_id": article_id, "article_content": article_content_str},
+                    )
+
+                    # 코퍼스 콘텐츠 버퍼에 아티클 콘텐츠 추가
+                    corpus_contents.append(article_content_str)
+
+                # 코퍼스 콘텐츠 저장 (아티클 콘텐츠들을 "\n\n"으로 연결)
+                corpus_content_str = "\n\n".join([t for t in corpus_contents if t])
+                session.run(
+                    """
+                    MATCH (co:Corpus {id: $corpus_id})
+                    SET co.content = $corpus_content
+                    """,
+                    {"corpus_id": corpus_id, "corpus_content": corpus_content_str},
+                )
 
             # 3) 요약 임베딩 벡터 생성 및 노드에 저장 (Corpus 제외)
             # Article vectors
