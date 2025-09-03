@@ -171,8 +171,8 @@ python src/run_benchmark.py
 
 ```json
 {
-  "Node": [
-    {
+    "Node": [
+        {
       "type": "Corpus",
       "properties": { "id": "uuid", "name": "file basename", "file_path": "original file path" }
     },
@@ -187,13 +187,13 @@ python src/run_benchmark.py
     {
       "type": "Chunk",
       "properties": { "id": "uuid", "content": "text", "summary": "text", "order": "int", "file_path": "string", "span": "[start,end]", "vector": "embedding" }
-    }
-  ],
-  "Edge": [
+        }
+    ],
+    "Edge": [
     { "type": "CHILD", "direction": "Corpus→Article→Section→Chunk" },
     { "type": "NEXT",  "direction": "Chunk→Chunk (within same Section)" },
     { "type": "PREV",  "direction": "Chunk→Chunk (within same Section)" }
-  ]
+    ]
 }
 ```
 

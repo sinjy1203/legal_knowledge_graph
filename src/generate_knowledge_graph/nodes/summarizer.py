@@ -28,90 +28,45 @@ class Summarizer:
     def __call__(self, state, runtime: Runtime[ContextSchema]):
         chain = runtime.context.summarizer_prompt | self.llm | StrOutputParser()
 
-        hierarchical_chunk_ids = state.hierarchical_chunk_ids or {}
-        chunks = state.chunks or []
+        structured_chunks = state.structured_chunks or {}
 
-        # Bottom-up summarization using batch with progress bars
-        for file_path, article_map in hierarchical_chunk_ids.items():
-            # 1) Section summaries from chunk summaries (batched)
-            section_tasks = []  # list[(article_name, section_name)]
-            section_inputs = []  # list[{"contents": str}]
-            for article_name, sections_map in list(article_map.items()):
-                for section_name, section_value in list(sections_map.items()):
-                    if section_name == "summary":
-                        continue
-                    # Support both legacy list format and new dict format
-                    if isinstance(section_value, dict):
-                        chunk_idx_list = section_value.get("chunk_ids", [])
-                    else:
-                        chunk_idx_list = section_value
+        def summarize_leaf(chunks_leaf):
+            contents = "\n\n".join([(getattr(c, "summary", None) or c.content or "").strip() for c in chunks_leaf]).strip()
+            if not contents:
+                return ""
+            return chain.invoke({"contents": contents})
 
-                    # Build contents from chunk summaries (fallback to content)
-                    contents_parts = []
-                    for idx in chunk_idx_list:
-                        if not (isinstance(idx, int) and 0 <= idx < len(chunks)):
-                            continue
-                        chunk_obj = chunks[idx]
-                        chunk_summary = (getattr(chunk_obj, "summary", None) or "").strip()
-                        if chunk_summary:
-                            contents_parts.append(chunk_summary)
-                        else:
-                            chunk_content = (getattr(chunk_obj, "content", None) or "").strip()
-                            if chunk_content:
-                                contents_parts.append(chunk_content)
+        def summarize_node(node):
+            # leaf: list[Chunk]
+            if isinstance(node, list):
+                summary = summarize_leaf(node)
+                return {"chunks": node, "summary": summary}
+            # dict: summarize children then self
+            if isinstance(node, dict):
+                child_summaries = []
+                updated = {}
+                for key, child in node.items():
+                    summarized_child = summarize_node(child)
+                    updated[key] = summarized_child
+                    # 자식 summary 수집
+                    child_summary = summarized_child.get("summary") if isinstance(summarized_child, dict) else None
+                    if child_summary:
+                        child_summaries.append(child_summary)
+                # 부모 요약 생성
+                parent_contents = "\n\n".join(child_summaries).strip()
+                parent_summary = chain.invoke({"contents": parent_contents}) if parent_contents else ""
+                updated["summary"] = parent_summary
+                return updated
+            return node
 
-                    contents = "\n\n".join(contents_parts).strip()
-
-                    # Ensure dict structure exists for section
-                    if not isinstance(section_value, dict):
-                        sections_map[section_name] = {
-                            "chunk_ids": list(chunk_idx_list) if isinstance(chunk_idx_list, (list, tuple)) else [],
-                        }
-                    else:
-                        if "chunk_ids" not in sections_map[section_name]:
-                            sections_map[section_name]["chunk_ids"] = list(chunk_idx_list) if isinstance(chunk_idx_list, (list, tuple)) else []
-
-                    if contents:
-                        section_tasks.append((article_name, section_name))
-                        section_inputs.append({"contents": contents})
-                    else:
-                        sections_map[section_name]["summary"] = ""
-
-            if section_inputs:
-                with BatchCallback(total=len(section_inputs)) as cb:
-                    section_summaries = chain.batch(section_inputs, config={"callbacks": [cb]})
-                for (article_name, section_name), summary in zip(section_tasks, section_summaries):
-                    hierarchical_chunk_ids[file_path][article_name][section_name]["summary"] = summary
-
-            # 2) Article summary from section summaries (batched)
-            article_tasks = []  # list[article_name]
-            article_inputs = []  # list[{"contents": str}]
-            for article_name, sections_map in list(article_map.items()):
-                section_summaries_for_article = []
-                for section_name, section_value in sections_map.items():
-                    if section_name == "summary":
-                        continue
-                    if isinstance(section_value, dict):
-                        s = section_value.get("summary")
-                        if s:
-                            section_summaries_for_article.append(s)
-
-                article_contents = "\n\n".join(section_summaries_for_article).strip()
-                if article_contents:
-                    article_tasks.append(article_name)
-                    article_inputs.append({"contents": article_contents})
-                else:
-                    sections_map["summary"] = ""
-
-            if article_inputs:
-                with BatchCallback(total=len(article_inputs)) as cb:
-                    article_summaries = chain.batch(article_inputs, config={"callbacks": [cb]})
-                for article_name, summary in zip(article_tasks, article_summaries):
-                    hierarchical_chunk_ids[file_path][article_name]["summary"] = summary
+        # 파일 경로 루트별로 처리
+        summarized_structured = {}
+        for file_path, tree in structured_chunks.items():
+            summarized_structured[file_path] = summarize_node(tree)
 
         return Command(
             update={
-                "hierarchical_chunk_ids": hierarchical_chunk_ids
+                "structured_chunks": summarized_structured,
             },
             goto="GraphDBWriter",
         )

@@ -5,6 +5,7 @@ from langchain_openai import ChatOpenAI
 from generate_knowledge_graph.utils.callback import BatchCallback
 from logger import setup_logger
 from langgraph.types import Command
+from uuid import uuid4
 from langgraph.runtime import Runtime
 
 from generate_knowledge_graph.state import ContextSchema
@@ -28,9 +29,9 @@ class GraphDBWriter:
             self.neo4j_client.setup_constraints()
             self.neo4j_client.setup_vector_indexes()
         
-        logger.info("Neo4j 그래프 데이터베이스에 데이터 저장 중...")
-
-        self.neo4j_client.create_nodes_and_relationships(state.chunks, state.hierarchical_chunk_ids)
+        # structured_chunks를 DB에 적재
+        structured = getattr(state, "structured_chunks", {}) or {}
+        self.neo4j_client.create_nodes_and_relationships(structured)
         self.neo4j_client.close()
         
         logger.info("Neo4j 그래프 데이터베이스에 데이터 저장 완료")

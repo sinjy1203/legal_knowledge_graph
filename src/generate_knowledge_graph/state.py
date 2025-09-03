@@ -12,7 +12,7 @@ class ContextSchema:
     document_structure_detector_prompt: ChatPromptTemplate = field(default=None)
     summarizer_prompt: ChatPromptTemplate = field(default=None)
     
-    chunking_strategy: Literal["naive", "rcts"] = field(default="naive")
+    chunking_strategy: Literal["naive", "rcts", "page"] = field(default="naive")
     chunk_size: int = field(default=500)
 
 
@@ -23,4 +23,4 @@ class State:
     documents: list = field(default_factory=list)
     table_of_contents: dict = field(default_factory=dict)
     chunks: list = field(default_factory=list)
-    hierarchical_chunk_ids: dict = field(default_factory=dict)
+    structured_chunks: list = field(default_factory=list)

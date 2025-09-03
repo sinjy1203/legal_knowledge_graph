@@ -1,4 +1,6 @@
+import re
 import json
+import difflib
 from langchain_core.prompts import ChatPromptTemplate
 from generate_knowledge_graph.utils import *
 from logger import setup_logger
@@ -11,67 +13,74 @@ from generate_knowledge_graph.state import ContextSchema
 logger = setup_logger()
 
 
-SYSTEM_TEMPLATE = """You are a document analysis expert specializing in legal contracts.  
-Your task is to determine which numbered section(s) a given contract chunk belongs to, based on:
-- the chunk content
-- the previous chunk
-- the section numbers of the previous chunk
+SYSTEM_TEMPLATE = """You must organize the contents of the legal contract into a hierarchical structure according to the given table of contents. The legal contract is being read sequentially, page by page. At this stage, you need to identify which parts of the current page’s content correspond to the items in the table of contents.
 
-You must also provide a concise summary of the chunk.  
+The provided data will be as follows:
+	•	<Table_of_Contents>: The table of contents of the legal contract. You must organize the contract contents according to this structure.
+	•	<Entries_identified_so_far>: The items from the table of contents that have been identified up to the previous page.
+	•	<Previous_Page>: The content of the previous page. Use this to determine whether the current page’s content continues from it.
+	•	<Current_Page>: The content of the current page. You must identify which parts of this correspond to the items in the table of contents.
 
-## Contract Structure
-- The first-level hierarchy is **ARTICLE** (e.g., "ARTICLE I", "ARTICLE II", ...).
-- The second-level hierarchy is **Section** within an ARTICLE (e.g., "Section 1.1", "Section 1.2", ...).
-- **Do not go deeper than the second level**. Ignore subsections like "Section 1.1.1" and treat their content as part of their parent Section.
-
-## Input Information
-- Full text of the current chunk
-- Full text of the previous chunk
-- The list of section numbers that the previous chunk belongs to (from parent to child), e.g.:  
-  `[["ARTICLE I", "Section 1.1"], ["ARTICLE I", "Section 1.2"]]`
-
-## Analysis Rules
-1. **Numbered Section Detection**
-   - Identify any ARTICLE or Section numbers in the current chunk.
-   - If an ARTICLE is found, it becomes the new top-level section, and all subsequent Sections belong under it until a new ARTICLE is encountered.
-   - If a Section is found, its parent is the current ARTICLE.
-   - If multiple Sections of the same level are present in a single chunk, record each as a separate path.  
-     Example: `"Section 1.1"` and `"Section 1.2"` in the same chunk →  
-     `[["ARTICLE I", "Section 1.1"], ["ARTICLE I", "Section 1.2"]]`
-
-2. **No Section Number**
-   - If the chunk does not begin with a section number, assume it belongs to the **last (deepest) section** from the previous chunk.  
-     Example: If the previous chunk belongs to `[["ARTICLE I", "Section 1.1"]]`, then the current chunk belongs to `["ARTICLE I", "Section 1.1"]`.
-
-3. **Summary Creation**
-   - Summarize the current chunk in **1–2 concise sentences**.
-
-## Output Format (JSON)
-Always return the output strictly in the following JSON format:
+Your answer must be in the following format:
 ```json
 {{
-  "section_numbers": [
-    ["parent_number", "child_number"],
-    ["parent_number", "another_child_number"]
-  ],
-  "summary": "1–2 sentence concise summary of the current chunk"
+“Article_I”: {{
+“section_1_1”: {{
+“start_sentence”: “The first sentence corresponding to section_1_1 under Article_I. This must be copied verbatim from <Current_Page>.”,
+“end_sentence”: “The last sentence corresponding to section_1_1 under Article_I. This must be copied verbatim from <Current_Page>.”
+}},
+…
+}},
+…
 }}
 ```
 """
 
-USER_TEMPLATE = """
-<current_chunk>
-{current_chunk}
-</current_chunk>
+USER_TEMPLATE = """<Table_of_Contents>
+{table_of_contents}
+</Table_of_Contents>
 
-<previous_chunk>
-{previous_chunk}
-</previous_chunk>
+<Entries_identified_so_far>
+{entries_identified_so_far}
+</Entries_identified_so_far>
 
-<previous_chunk_section_numbers>
-{previous_chunk_section_numbers}
-</previous_chunk_section_numbers>
+<Previous_Page>
+{previous_page}
+</Previous_Page>
+
+<Current_Page>
+{current_page}
+</Current_Page>
 """
+
+def _best_window_by_words(current_page: str, target_sentence: str):
+    token_spans = [(m.start(), m.end()) for m in re.finditer(r'\S+', current_page)]
+    words_in_target = re.findall(r'\S+', target_sentence)
+    window_words = len(words_in_target)
+    if window_words <= 0 or not token_spans:
+        return 0, 0, 0.0
+
+    best_score = -1.0
+    best_start_char, best_end_char = 0, 0
+    cp_lower = current_page.lower()
+    target_lower = target_sentence.lower()
+
+    max_start = len(token_spans) - window_words
+    for i in range(max_start + 1):
+        w_start = token_spans[i][0]
+        w_end = token_spans[i + window_words - 1][1]
+        window_text = cp_lower[w_start:w_end]
+        score = difflib.SequenceMatcher(None, target_lower, window_text).ratio()
+        if score > best_score:
+            best_score = score
+            best_start_char, best_end_char = w_start, w_end
+
+    return best_start_char, best_end_char, best_score
+
+def find_sentence_range(current_page: str, start_sentence: str, end_sentence: str):
+    s_start, s_end, _ = _best_window_by_words(current_page, start_sentence)
+    e_start, e_end, _ = _best_window_by_words(current_page, end_sentence)
+    return s_start, e_end
 
 
 class DocumentStructureDetector:
@@ -80,83 +89,66 @@ class DocumentStructureDetector:
 
     def __call__(self, state, runtime: Runtime[ContextSchema]):
         chain = runtime.context.document_structure_detector_prompt | self.llm | JsonOutputParser()
-        previous_chunk_clause_list = []
-        previous_chunk_file_path = None
-        
-        # table_of_contents_flag = False
-        # merger_flag = False
-        hierarchical_chunk_ids = {}
+        # 각 path마다 하나의 Chunk를 만들기 위한 버킷
+        path_level_chunks = []
+        previous_chunk = None
+        entries_identified_so_far = []
 
-        for chunk_idx, chunk in enumerate(state.chunks):
-            chunk.content = chunk.content.strip()
-            if chunk.content == "":
-                continue
+        # file_path → 원문 Document content 매핑 구성
+        structured_chunks = {}
 
-            if previous_chunk_file_path != chunk.file_path:
-                previous_chunk_clause_list = []
-                previous_chunk_file_path = chunk.file_path
+        for chunk in state.chunks:
+            if previous_chunk and previous_chunk.file_path != chunk.file_path:
+                previous_chunk = None
+                entries_identified_so_far = []
+
             
-            # if not table_of_contents_flag and "TABLE OF CONTENTS" in chunk.content.upper():
-            #     table_of_contents_flag = True
-            
-            # if not merger_flag and table_of_contents_flag and "AGREEMENT AND PLAN OF MERGER" in chunk.content.upper():
-            #     merger_flag = True
-            
-            # if not (table_of_contents_flag and merger_flag):
-            #     continue
                     
             response = chain.invoke(
                 {
                     "file_path": chunk.file_path,
                     "table_of_contents": state.table_of_contents[chunk.file_path],
-                    "identified_clauses": previous_chunk_clause_list,
-                    "latest_identified_clause": previous_chunk_clause_list[-1] if len(previous_chunk_clause_list) > 0 else "",
-                    "current_chunk_content": chunk.content,
+                    "latest_entry": entries_identified_so_far[-1] if entries_identified_so_far else None,
+                    # "previous_page": previous_chunk.content if previous_chunk else "",
+                    "current_page": chunk.content,
                 }
             )
 
-            chunk_summary = response["chunk_summary"]
-            if len(response["chunk_clause_list"]) > 0:
-                if len(previous_chunk_clause_list) == 0 and response["chunk_clause_list"][0] != "1.1":
-                    pass
-                else:
-                    chunk_clause_list = response["chunk_clause_list"]
-            else:
-                chunk_clause_list = previous_chunk_clause_list[-1:]
+            def find_key_paths(response_data, structured_chunks, path=[]):
+                for key, value in response_data.items():
+                    if "start_sentence" in value and "end_sentence" in value:
+                        local_start, local_end = find_sentence_range(
+                            chunk.content, value["start_sentence"], value["end_sentence"]
+                        )
+                        abs_start = chunk.span[0] + local_start
+                        abs_end = chunk.span[0] + local_end
 
-            if len(chunk_clause_list) != 0:
-                chunk.summary = chunk_summary
-                # Update hierarchical_chunk_ids with current chunk index for each detected path under file_path
-                current_file_path = getattr(chunk, "file_path", None)
-                if not current_file_path:
-                    # Skip if file_path is unavailable
-                    pass
-                else:
-                    if current_file_path not in hierarchical_chunk_ids:
-                        hierarchical_chunk_ids[current_file_path] = {}
+                        if key not in structured_chunks:
+                            structured_chunks[key] = []
 
-                    for chunk_clause in chunk_clause_list:
-                        parent_number, child_number = chunk_clause.split(".")
-                        parent_number = f"Article {parent_number}"
-                        child_number = f"Section {child_number}"
+                        structured_chunks[key].append(
+                            Chunk(
+                                file_path=chunk.file_path,
+                                span=(abs_start, abs_end),
+                                content=chunk.content[local_start:local_end],
+                            )
+                        )
+                        entries_identified_so_far.append(path + [key])
+                    else:
+                        if key not in structured_chunks:
+                            structured_chunks[key] = {}
+                        
+                        find_key_paths(value, structured_chunks[key], path + [key])
 
-                        # Initialize nested structure if missing
-                        if parent_number not in hierarchical_chunk_ids[current_file_path]:
-                            hierarchical_chunk_ids[current_file_path][parent_number] = {}
-                        if child_number not in hierarchical_chunk_ids[current_file_path][parent_number]:
-                            hierarchical_chunk_ids[current_file_path][parent_number][child_number] = []
+            if chunk.file_path not in structured_chunks:
+                structured_chunks[chunk.file_path] = {}
 
-                        # Append the current chunk index
-                        hierarchical_chunk_ids[current_file_path][parent_number][child_number].append(chunk_idx)
-
-                        if chunk_clause not in previous_chunk_clause_list:
-                            previous_chunk_clause_list.append(chunk_clause)
-
+            find_key_paths(response, structured_chunks[chunk.file_path])
         
+        # path 단위로 생성한 Chunk 목록을 다음 단계로 전달
         return Command(
             update={
-                "chunks": state.chunks,
-                "hierarchical_chunk_ids": hierarchical_chunk_ids
+                "structured_chunks": structured_chunks,
             },
             goto="Summarizer"
         )

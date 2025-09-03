@@ -52,7 +52,7 @@ def main():
     langfuse_handler = CallbackHandler()
     input = {}
     context = {
-        "chunking_strategy": "rcts",
+        "chunking_strategy": "page",
         "table_of_contents_extractor_prompt": get_system_prompt("table-of-contents-extractor"),
         "contract_start_finder_prompt": get_system_prompt("contract-start-finder"),
         "document_structure_detector_prompt": get_system_prompt("document-structure-detector"),
