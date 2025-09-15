@@ -94,7 +94,7 @@ class DataLoader:
         for document_file_path in sorted(used_document_file_paths_set):
             # if document_file_path != "maud/DSP_Group_Synaptics_Incorporated.txt" and document_file_path != "maud/Adamas_Pharmaceuticals_Supernus_Pharmaceuticals.txt":
             # if document_file_path != "maud/TIFFANY_&_CO._LVMH_MOËT_HENNESSY-LOUIS_VUITTON.txt":
-                # continue
+            #     continue
             with open(f"./data/corpus/{document_file_path}", encoding="utf-8") as f:
                 corpus.append(
                     Document(

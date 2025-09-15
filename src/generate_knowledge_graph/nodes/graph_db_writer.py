@@ -29,9 +29,9 @@ class GraphDBWriter:
             self.neo4j_client.setup_constraints()
             self.neo4j_client.setup_vector_indexes()
         
-        # structured_chunks를 DB에 적재
-        structured = getattr(state, "structured_chunks", {}) or {}
-        self.neo4j_client.create_nodes_and_relationships(structured)
+        # Summarizer에서 업데이트된 documents를 DB에 적재
+        documents = getattr(state, "documents", []) or []
+        self.neo4j_client.create_nodes_and_relationships(documents)
         self.neo4j_client.close()
         
         logger.info("Neo4j 그래프 데이터베이스에 데이터 저장 완료")

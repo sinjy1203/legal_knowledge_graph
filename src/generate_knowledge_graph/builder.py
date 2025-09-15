@@ -12,26 +12,30 @@ load_dotenv(override=True)
 llm = ChatOpenAI(
     base_url=os.getenv("LLM_BASE_URL"),
     model=os.getenv("LLM_MODEL"),
-    temperature=0.0,
-    api_key=os.getenv("LLM_API_KEY")
+    # temperature=0.0,
+    api_key=os.getenv("LLM_API_KEY"),
+    max_tokens=32768
 )
 
-reasoning_llm = ChatOpenAI(
-    base_url=os.getenv("REASONING_LLM_BASE_URL"),
-    model=os.getenv("REASONING_LLM_MODEL"),
-    api_key=os.getenv("REASONING_LLM_API_KEY"),
-    temperature=0.6,
-    top_p=0.95,
-    extra_body={
-        "top_k": 20,
-        "min_p": 0
-    }
-)
+# reasoning_llm = ChatOpenAI(
+#     base_url=os.getenv("REASONING_LLM_BASE_URL"),
+#     model=os.getenv("REASONING_LLM_MODEL"),
+#     api_key=os.getenv("REASONING_LLM_API_KEY"),
+#     # reasoning={
+#     #     "effort": "high"
+#     # }
+#     # temperature=0.6,
+#     # top_p=0.95,
+#     # extra_body={
+#     #     "top_k": 20,
+#     #     "min_p": 0
+#     # }
+# )
 
 embedding_model = OpenAIEmbeddings(
     base_url=os.getenv("EMBEDDING_BASE_URL"),
     model=os.getenv("EMBEDDING_MODEL"),
-    api_key="dummy"
+    api_key=os.getenv("EMBEDDING_API_KEY")
 )
 
 # Neo4j 설정 (임베딩 모델 포함)
@@ -49,8 +53,7 @@ workflow = StateGraph(State, context_schema=ContextSchema)
 workflow.add_node("DataLoader", DataLoader())
 workflow.add_node("IntroBodySeparator", IntroBodySeparator(llm))
 workflow.add_node("TableOfContentsExtractor", TableOfContentsExtractor(llm))
-workflow.add_node("Chunker", Chunker())
-workflow.add_node("DocumentStructureDetector", DocumentStructureDetector(reasoning_llm))
+workflow.add_node("Chunker", Chunker(llm))
 workflow.add_node("Summarizer", Summarizer(llm))
 workflow.add_node("GraphDBWriter", GraphDBWriter(neo4j_client))
 

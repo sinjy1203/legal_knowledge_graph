@@ -1,19 +1,24 @@
-from pydantic import BaseModel
-from typing import List, Tuple
+from pydantic import BaseModel, Field
+from typing import List, Tuple, ForwardRef
+
+
+ChunkRef = ForwardRef('Chunk')
 
 
 class Document(BaseModel):
     file_path: str = ""
-    content: str = ""
     intro: str = ""
-    body: str = ""
-    body_span: Tuple[int, int] = (0, 0)
+    table_of_contents: dict = {}
+    span: Tuple[int, int] = (0, 0)
+    content: str = ""
+    summary: str = ""
+    # dict 트리 구조를 보관하고, 리프는 Chunk 인스턴스로 치환하여 저장
+    children: dict = Field(default_factory=dict)
 
 
 class Chunk(BaseModel):
-    file_path: str = ""
+    name: str = ""
     span: Tuple[int, int] = (0, 0)
     content: str = ""
-    order: int = 0
     summary: str = ""
-    clause_list: list = []
+    children: List[ChunkRef] = []

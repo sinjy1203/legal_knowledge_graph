@@ -11,23 +11,6 @@ from generate_knowledge_graph.utils import JsonOutputParser
 logger = setup_logger()
 
 
-SYSTEM_TEMPLATE = """
-You are a document analysis expert specializing in legal contracts.
-Your task is to locate the sentence that appears just before the start of the main text of ARTICLE I, following the table of contents and basic contract information. Typically, the sentence ‘NOW, THEREFORE, in consideration of the…’ appears immediately before ARTICLE I begins. Therefore, you need to identify a sentence matching this pattern.
-# Output Format
-{{
-"contract_start_sentence": "The exact sentence from the contract that appears just before the start of the main text of ARTICLE I"
-}}
-
-"""
-
-USER_TEMPLATE = """
-<Legal_Contract>
-{legal_contract}
-</Legal_Contract>
-"""
-
-
 class IntroBodySeparator:
     def __init__(self, llm):
         self.llm = llm
@@ -51,18 +34,16 @@ class IntroBodySeparator:
                 # 본문(body): 'follows:' 이후
                 start = idx + len(marker)
                 end = len(content)
-                filtered = content[start:]
-                document.body = filtered
+                document.content = content[start:]
                 # 인트로(intro): 'follows:' 이전
                 document.intro = content[:idx]
                 # 본문 구간 span 저장 (원본 텍스트 기준 인덱스)
-                document.body_span = (start, end)
+                document.span = (start, end)
             else:
                 # 구분자가 없으면 본문 전체로 간주하고 인트로는 빈 문자열
-                filtered = content
                 document.body = content
                 document.intro = ""
-                document.body_span = (0, len(content))
+                document.span = (0, len(content))
 
         return Command(
             update={

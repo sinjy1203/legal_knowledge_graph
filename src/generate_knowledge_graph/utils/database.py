@@ -1,4 +1,5 @@
 from tqdm.auto import tqdm
+import json
 from uuid import uuid4
 from neo4j import GraphDatabase
 
@@ -52,7 +53,7 @@ class Neo4jConnection:
                 ON (n.vector)
                 OPTIONS {{
                     indexConfig: {{
-                        `vector.dimensions`: 1024,
+                        `vector.dimensions`: 3072,
                         `vector.similarity_function`: "cosine"
                     }}
                 }}
@@ -74,228 +75,134 @@ class Neo4jConnection:
                 """)
                 print(f"✅ {node_type} ID 제약조건 생성 완료")
 
-    def create_nodes_and_relationships(self, structured_chunks):
+    def create_nodes_and_relationships(self, documents):
         with self.driver.session() as session:
             # 임베딩 대상 수집용 버퍼
-            article_ids_for_embedding = []
-            article_summaries_for_embedding = []
-            section_ids_for_embedding = []
-            section_summaries_for_embedding = []
-            chunk_ids_for_embedding = []
-            chunk_summaries_for_embedding = []
+            node_ids_for_embedding = []
+            texts_for_embedding = []
 
-            def collect_all_chunk_contents(subtree):
-                contents = []
-                if isinstance(subtree, dict):
-                    if isinstance(subtree.get("chunks"), list):
-                        contents += [getattr(ch, "content", "") for ch in subtree["chunks"]]
-                    for k, v in subtree.items():
-                        if k in ("summary", "chunks"):
-                            continue
-                        if isinstance(v, dict):
-                            contents += collect_all_chunk_contents(v)
-                return contents
-
-            for file_path, article_tree in structured_chunks.items():
-                corpus_name = (file_path.split("/")[-1] if file_path else "")
+            def ensure_corpus(file_path: str, table_of_contents: dict | None = None):
                 corpus_id = str(uuid4())
-
-                # Corpus 노드 생성
+                corpus_name = file_path.split("/")[-1] if file_path else ""
+                toc_str = json.dumps(table_of_contents or {}, ensure_ascii=False)
                 session.run(
                     """
                     MERGE (co:Corpus {id: $corpus_id})
                     SET co.name = $corpus_name,
-                        co.file_path = $file_path
+                        co.file_path = $file_path,
+                        co.table_of_contents = $table_of_contents
                     """,
-                    {"corpus_id": corpus_id, "corpus_name": corpus_name, "file_path": file_path},
+                    {
+                        "corpus_id": corpus_id,
+                        "corpus_name": corpus_name,
+                        "file_path": file_path,
+                        "table_of_contents": toc_str,
+                    },
                 )
+                return corpus_id
 
-                corpus_contents = []
-
-                def create_article(name: str, subtree: dict):
-                    article_id = str(uuid4())
-                    article_summary = subtree.get("summary", "") if isinstance(subtree, dict) else ""
-                    session.run(
-                        """
-                        MERGE (a:Article {id: $article_id})
-                        SET a.name = $name,
-                            a.summary = $summary
-                        """,
-                        {"article_id": article_id, "name": name, "summary": article_summary},
-                    )
-                    session.run(
-                        """
-                        MATCH (co:Corpus {id: $corpus_id}), (a:Article {id: $article_id})
-                        MERGE (co)-[:CHILD]->(a)
-                        """,
-                        {"corpus_id": corpus_id, "article_id": article_id},
-                    )
-                    if article_summary.strip():
-                        article_ids_for_embedding.append(article_id)
-                        article_summaries_for_embedding.append(article_summary)
-
-                    # Article content는 하위 섹션 전체 chunk content를 연결
-                    article_contents = []
-
-                    def create_section(parent_label: str, parent_id: str, name: str, subtree: dict):
-                        section_id = str(uuid4())
-                        section_summary = subtree.get("summary", "") if isinstance(subtree, dict) else ""
-                        session.run(
-                            """
-                            MERGE (s:Section {id: $section_id})
-                            SET s.name = $name,
-                                s.summary = $summary
-                            """,
-                            {"section_id": section_id, "name": name, "summary": section_summary},
-                        )
-                        session.run(
-                            f"""
-                            MATCH (p:{parent_label} {{id: $parent_id}}), (s:Section {{id: $section_id}})
-                            MERGE (p)-[:CHILD]->(s)
-                            """,
-                            {"parent_id": parent_id, "section_id": section_id},
-                        )
-                        if section_summary.strip():
-                            section_ids_for_embedding.append(section_id)
-                            section_summaries_for_embedding.append(section_summary)
-
-                        # Leaf chunks 생성
-                        if isinstance(subtree, dict) and isinstance(subtree.get("chunks"), list):
-                            prev_chunk_id = None
-                            for order_idx, ch in enumerate(subtree["chunks"]):
-                                chunk_id = str(uuid4())
-                                span_value = list(getattr(ch, "span", (0, 0)))
-                                content_value = getattr(ch, "content", "")
-                                summary_value = getattr(ch, "summary", "")
-                                file_path_value = getattr(ch, "file_path", file_path)
-                                session.run(
-                                    """
-                                    MERGE (c:Chunk {id: $chunk_id})
-                                    ON CREATE SET c.span = $span,
-                                                  c.content = $content,
-                                                  c.summary = $summary,
-                                                  c.order = $order,
-                                                  c.file_path = $file_path
-                                    """,
-                                    {
-                                        "chunk_id": chunk_id,
-                                        "span": span_value,
-                                        "content": content_value,
-                                        "summary": summary_value,
-                                        "order": order_idx,
-                                        "file_path": file_path_value,
-                                    },
-                                )
-                                session.run(
-                                    """
-                                    MATCH (s:Section {id: $section_id}), (c:Chunk {id: $chunk_id})
-                                    MERGE (s)-[:CHILD]->(c)
-                                    """,
-                                    {"section_id": section_id, "chunk_id": chunk_id},
-                                )
-                                if summary_value.strip():
-                                    chunk_ids_for_embedding.append(chunk_id)
-                                    chunk_summaries_for_embedding.append(summary_value)
-                                if prev_chunk_id is not None:
-                                    session.run(
-                                        """
-                                        MATCH (p:Chunk {id: $prev}), (c:Chunk {id: $cur})
-                                        MERGE (p)-[:NEXT]->(c)
-                                        MERGE (c)-[:PREV]->(p)
-                                        """,
-                                        {"prev": prev_chunk_id, "cur": chunk_id},
-                                    )
-                                prev_chunk_id = chunk_id
-
-                        # Section content: 하위 전체 chunk content 연결
-                        section_contents = collect_all_chunk_contents(subtree)
-                        section_content_str = "\n\n".join([t for t in section_contents if t])
-                        session.run(
-                            """
-                            MATCH (s:Section {id: $section_id})
-                            SET s.content = $content
-                            """,
-                            {"section_id": section_id, "content": section_content_str},
-                        )
-
-                        # 하위 섹션 처리
-                        if isinstance(subtree, dict):
-                            for child_name, child_val in subtree.items():
-                                if child_name in ("summary", "chunks"):
-                                    continue
-                                if isinstance(child_val, dict):
-                                    create_section("Section", section_id, child_name, child_val)
-
-                        # Article content 누적
-                        article_contents.append(section_content_str)
-
-                    # 최상위 섹션들 생성
-                    for section_name, section_subtree in subtree.items():
-                        if section_name == "summary":
-                            continue
-                        if isinstance(section_subtree, dict):
-                            create_section("Article", article_id, section_name, section_subtree)
-
-                    # Article content 저장
-                    article_content_str = "\n\n".join([t for t in article_contents if t])
-                    session.run(
-                        """
-                        MATCH (a:Article {id: $article_id})
-                        SET a.content = $content
-                        """,
-                        {"article_id": article_id, "content": article_content_str},
-                    )
-
-                    # Corpus content 누적
-                    corpus_contents.append(article_content_str)
-
-                # 각 Article 처리
-                for article_name, article_subtree in article_tree.items():
-                    if article_name == "summary":
-                        continue
-                    if isinstance(article_subtree, dict):
-                        article_id = create_article(article_name, article_subtree)
-
-                # Corpus content 저장
-                corpus_content_str = "\n\n".join([t for t in corpus_contents if t])
+            def create_chunks_recursive(parent_label: str, parent_id: str, chunk_obj, order_idx: int = 0, file_path: str = ""):
+                chunk_id = str(uuid4())
+                # Chunk 객체 처리 (dict는 들어오지 않음)
+                span_value = list(getattr(chunk_obj, "span", (0, 0)))
+                content_value = getattr(chunk_obj, "content", "")
+                summary_value = getattr(chunk_obj, "summary", "")
+                name_value = getattr(chunk_obj, "name", "")
                 session.run(
                     """
-                    MATCH (co:Corpus {id: $corpus_id})
-                    SET co.content = $content
+                    MERGE (c:Chunk {id: $chunk_id})
+                    ON CREATE SET c.span = $span,
+                                  c.content = $content,
+                                  c.summary = $summary,
+                                  c.order = $order,
+                                  c.name = $name,
+                                  c.file_path = $file_path
                     """,
-                    {"corpus_id": corpus_id, "content": corpus_content_str},
+                    {
+                        "chunk_id": chunk_id,
+                        "span": span_value,
+                        "content": content_value,
+                        "summary": summary_value,
+                        "order": order_idx,
+                        "name": name_value,
+                        "file_path": file_path,
+                    },
                 )
+                session.run(
+                    f"""
+                    MATCH (p:{parent_label} {{id: $parent_id}}), (c:Chunk {{id: $chunk_id}})
+                    MERGE (p)-[:CHILD]->(c)
+                    """,
+                    {"parent_id": parent_id, "chunk_id": chunk_id},
+                )
+                # 자식 재귀 및 NEXT/PREV 연결
+                prev_child_id = None
+                for child_idx, child in enumerate(getattr(chunk_obj, "children", []) or []):
+                    child_chunk_id = create_chunks_recursive("Chunk", chunk_id, child, child_idx, file_path)
+                    if prev_child_id is not None:
+                        session.run(
+                            """
+                            MATCH (p:Chunk {id: $prev}), (c:Chunk {id: $cur})
+                            MERGE (p)-[:NEXT]->(c)
+                            MERGE (c)-[:PREV]->(p)
+                            """,
+                            {"prev": prev_child_id, "cur": child_chunk_id},
+                        )
+                    prev_child_id = child_chunk_id
 
-            # 임베딩 벡터 저장 (요약이 있는 것만)
-            if article_summaries_for_embedding:
-                article_vectors = self.batch_embed(article_summaries_for_embedding)
-                for node_id, vector in zip(article_ids_for_embedding, article_vectors):
-                    session.run(
-                        """
-                        MATCH (a:Article {id: $id})
-                        SET a.vector = $vector
-                        """,
-                        {"id": node_id, "vector": vector},
-                    )
+                # 임베딩 대상 텍스트 선택: summary가 비었으면 content 사용
+                text_for_vec = summary_value.strip() if summary_value and summary_value.strip() else content_value
+                if text_for_vec.strip():
+                    node_ids_for_embedding.append(("Chunk", chunk_id))
+                    texts_for_embedding.append(text_for_vec)
+                return chunk_id
 
-            if section_summaries_for_embedding:
-                section_vectors = self.batch_embed(section_summaries_for_embedding)
-                for node_id, vector in zip(section_ids_for_embedding, section_vectors):
-                    session.run(
-                        """
-                        MATCH (s:Section {id: $id})
-                        SET s.vector = $vector
-                        """,
-                        {"id": node_id, "vector": vector},
-                    )
+            for doc in documents:
+                file_path = getattr(doc, "file_path", "")
+                toc = getattr(doc, "table_of_contents", {}) or {}
+                corpus_id = ensure_corpus(file_path, toc)
+                # 문서 루트는 Article로 간주하지 않고, Corpus -> Chunk 트리로 적재
+                prev_top_id = None
+                # dict 트리를 순회
+                top_children = getattr(doc, "children", {}) or {}
+                prev_top_id = None
+                for idx, top_chunk in enumerate(list(top_children.values())):
+                    top_id = create_chunks_recursive("Corpus", corpus_id, top_chunk, idx, file_path)
+                    if prev_top_id is not None:
+                        session.run(
+                            """
+                            MATCH (p:Chunk {id: $prev}), (c:Chunk {id: $cur})
+                            MERGE (p)-[:NEXT]->(c)
+                            MERGE (c)-[:PREV]->(p)
+                            """,
+                            {"prev": prev_top_id, "cur": top_id},
+                        )
+                    prev_top_id = top_id
 
-            if chunk_summaries_for_embedding:
-                chunk_vectors = self.batch_embed(chunk_summaries_for_embedding)
-                for node_id, vector in zip(chunk_ids_for_embedding, chunk_vectors):
+                # 문서 요약도 저장 및 벡터화 대상
+                doc_summary = getattr(doc, "summary", "")
+                doc_content = getattr(doc, "content", "")
+                text_for_vec = doc_summary.strip() if doc_summary and doc_summary.strip() else doc_content
+                session.run(
+                    """
+                    MERGE (doc:Corpus {id: $corpus_id})
+                    SET doc.summary = $summary,
+                        doc.content = $content
+                    """,
+                    {"corpus_id": corpus_id, "summary": doc_summary, "content": doc_content},
+                )
+                if text_for_vec.strip():
+                    node_ids_for_embedding.append(("Corpus", corpus_id))
+                    texts_for_embedding.append(text_for_vec)
+
+            # 임베딩 생성 후 각 노드에 저장
+            if texts_for_embedding:
+                vectors = self.batch_embed(texts_for_embedding)
+                for (label, node_id), vec in zip(node_ids_for_embedding, vectors):
                     session.run(
-                        """
-                        MATCH (c:Chunk {id: $id})
-                        SET c.vector = $vector
+                        f"""
+                        MATCH (n:{label} {{id: $id}})
+                        SET n.vector = $vector
                         """,
-                        {"id": node_id, "vector": vector},
+                        {"id": node_id, "vector": vec},
                     )

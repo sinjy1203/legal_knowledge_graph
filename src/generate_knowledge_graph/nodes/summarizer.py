@@ -27,46 +27,133 @@ class Summarizer:
 
     def __call__(self, state, runtime: Runtime[ContextSchema]):
         chain = runtime.context.summarizer_prompt | self.llm | StrOutputParser()
+        documents = getattr(state, "documents", []) or []
 
-        structured_chunks = state.structured_chunks or {}
+        def walk_chunks(tree):
+            # dict 트리: 값으로 저장된 최상위 Chunk들을 순회
+            if isinstance(tree, dict):
+                for v in (tree or {}).values():
+                    yield from walk_chunks(v)
+                return
+            # Chunk 노드
+            if hasattr(tree, "children") and isinstance(getattr(tree, "children"), list):
+                yield tree
+                for child in tree.children or []:
+                    yield from walk_chunks(child)
 
-        def summarize_leaf(chunks_leaf):
-            contents = "\n\n".join([(getattr(c, "summary", None) or c.content or "").strip() for c in chunks_leaf]).strip()
-            if not contents:
-                return ""
-            return chain.invoke({"contents": contents})
+        def collect_leaves(tree):
+            leaves = []
+            for node in walk_chunks(tree):
+                if not getattr(node, "children", None):
+                    leaves.append(node)
+            return leaves
 
-        def summarize_node(node):
-            # leaf: list[Chunk]
-            if isinstance(node, list):
-                summary = summarize_leaf(node)
-                return {"chunks": node, "summary": summary}
-            # dict: summarize children then self
-            if isinstance(node, dict):
-                child_summaries = []
-                updated = {}
-                for key, child in node.items():
-                    summarized_child = summarize_node(child)
-                    updated[key] = summarized_child
-                    # 자식 summary 수집
-                    child_summary = summarized_child.get("summary") if isinstance(summarized_child, dict) else None
-                    if child_summary:
-                        child_summaries.append(child_summary)
-                # 부모 요약 생성
-                parent_contents = "\n\n".join(child_summaries).strip()
-                parent_summary = chain.invoke({"contents": parent_contents}) if parent_contents else ""
-                updated["summary"] = parent_summary
-                return updated
-            return node
+        def collect_parents_by_depth(tree):
+            # 깊이 계산: 루트 0부터, 자식은 +1. 리프 제외
+            depth_map = {}
+            def dfs(node, depth):
+                if not getattr(node, "children", None):
+                    return
+                depth_map.setdefault(depth, []).append(node)
+                for ch in node.children or []:
+                    dfs(ch, depth + 1)
+            if isinstance(tree, dict):
+                for v in (tree or {}).values():
+                    dfs(v, 0)
+            else:
+                dfs(tree, 0)
+            return depth_map
 
-        # 파일 경로 루트별로 처리
-        summarized_structured = {}
-        for file_path, tree in structured_chunks.items():
-            summarized_structured[file_path] = summarize_node(tree)
+        def gather_nodes_at_level(tree, level):
+            return [ch for ch in iter_chunks_from_tree(tree or []) if int(getattr(ch, "level", 0) or 0) == level]
 
-        return Command(
-            update={
-                "structured_chunks": summarized_structured,
-            },
-            goto="GraphDBWriter",
-        )
+        def batch_run(inputs, batch_size=16, desc="Summarizer"):
+            outputs = []
+            if not inputs:
+                return outputs
+            with BatchCallback(total=len(inputs), desc=desc) as cb:
+                outputs = chain.batch(inputs, config={"callbacks": [cb], "max_concurrency": batch_size})
+            return outputs
+
+        def compute_max_depth(tree):
+            max_depth = 0
+            def dfs(node, depth):
+                nonlocal max_depth
+                if isinstance(node, dict):
+                    for v in (node or {}).values():
+                        dfs(v, depth)
+                    return
+                # node is a Chunk
+                if depth > max_depth:
+                    max_depth = depth
+                for ch in (getattr(node, "children", []) or []):
+                    dfs(ch, depth + 1)
+            if isinstance(tree, dict):
+                for v in (tree or {}).values():
+                    dfs(v, 0)
+            else:
+                dfs(tree, 0)
+            return max_depth
+
+        # 레벨(층) 정보 계산: 루트=0, 리프=최대 깊이
+        global_max_depth = 0
+        for d in documents:
+            global_max_depth = max(global_max_depth, compute_max_depth(getattr(d, "children", {}) or {}))
+        total_layers = global_max_depth + 1
+
+        # 1) 모든 문서의 리프를 요약(배치)
+        leaf_inputs = []
+        leaf_nodes = []
+        for d in documents:
+            for leaf in collect_leaves(getattr(d, "children", {}) or {}):
+                leaf_inputs.append({"contents": leaf.content})
+                leaf_nodes.append(leaf)
+        if leaf_inputs:
+            # 리프는 최하단 레벨로 표시
+            leaf_summaries = batch_run(
+                leaf_inputs,
+                desc=f"Summarizer L{global_max_depth + 1}/{total_layers}"
+            )
+            for node, summary in zip(leaf_nodes, leaf_summaries):
+                node.summary = summary
+
+        # 2) 부모들을 바텀업으로 요약(깊은 레벨부터)
+        # 문서마다 깊이 맵 생성 후, 가장 깊은 레벨부터 위로 올라가며 요약
+        for d in documents:
+            depth_map = collect_parents_by_depth(getattr(d, "children", {}) or {})
+            for depth in sorted(depth_map.keys(), reverse=True):
+                parents = depth_map[depth]
+                if not parents:
+                    continue
+                inputs = []
+                for node in parents:
+                    child_text = "\n\n".join(
+                        [
+                            (getattr(c, "summary", None) or getattr(c, "content", "") or "").strip()
+                            for c in (getattr(node, "children", []) or [])
+                        ]
+                    )
+                    inputs.append({"contents": child_text})
+                # 부모는 해당 깊이(0부터 시작)를 1-based로 표기
+                summaries = batch_run(
+                    inputs,
+                    desc=f"Summarizer L{depth + 1}/{total_layers}"
+                )
+                for node, summary in zip(parents, summaries):
+                    node.summary = summary
+
+        # 3) 문서 레벨 요약(배치 처리)
+        doc_inputs = []
+        doc_refs = []
+        for d in documents:
+            top_children = getattr(d, "children", {}) or {}
+            top_chunks = list(top_children.values())
+            contents = "\n\n".join([ (getattr(c, "summary", None) or getattr(c, "content", "") or "").strip() for c in top_chunks ])
+            doc_inputs.append({"contents": contents})
+            doc_refs.append(d)
+        if doc_inputs:
+            doc_summaries = batch_run(doc_inputs)
+            for d, s in zip(doc_refs, doc_summaries):
+                d.summary = s
+
+        return Command(update={"documents": documents}, goto="GraphDBWriter")
