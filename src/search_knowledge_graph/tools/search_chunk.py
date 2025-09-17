@@ -9,20 +9,19 @@ from langchain_core.callbacks import (
 
 
 class SearchChunkInput(BaseModel):
-    section_id: str = Field(
-        description="Section ID to search within"
+    id: str = Field(
+        description="A contract_id or a component_id in UUID format"
     )
     query: str = Field(
-        description="Query to search"
+        description="needed content"
     )
 
 
 class SearchChunkTool(BaseTool):
-    name: str = "SearchChunkTool"
+    name: str = "SearchLowerLevelComponentTool"
     description: str = (
-        "This tool searches Chunk nodes within a specific Section by semantic similarity to the query. "
-        "Purpose: Given a section_id and a natural-language query, return the most relevant Chunks. "
-        "return_schema: [{‘id’: chunk_id, ‘content’: chunk_content}, …]"
+        "This tool looks through the tree-structured table of contents of a contract and finds lower-level components that are most relevant to the needed content. "
+        "return_schema: [{‘component_id’: component_id, 'component_name': component_name, ‘component_summary’: summary}, …]"
     )
     args_schema: Type[BaseModel] = SearchChunkInput
     return_direct: bool = False
@@ -34,11 +33,13 @@ class SearchChunkTool(BaseTool):
     similarity_threshold: float = 0.0
 
     CYPHER_QUERY: ClassVar[str] = """
-    MATCH (s:Section {id: $section_id})-[:CHILD]->(c:Chunk)
-    WHERE c.vector IS NOT NULL
+    MATCH (n)-[:CHILD]->(c:Chunk)
+    WHERE (n:Corpus OR n:Chunk) AND n.id = $id AND c.vector IS NOT NULL
     WITH c, gds.similarity.cosine(c.vector, $query_vector) AS score
     WHERE score > $similarity_threshold
-    RETURN c.id AS id, c.content AS content
+    RETURN c.id AS component_id,
+           c.name AS component_name,
+           CASE WHEN c.summary IS NULL OR c.summary = '' THEN c.content ELSE c.summary END AS component_summary
     ORDER BY score DESC
     LIMIT $top_k
     """
@@ -53,13 +54,13 @@ class SearchChunkTool(BaseTool):
 
     def _run(
         self,
-        section_id: str,
+        id: str,
         query: str,
         run_manager: Optional[CallbackManagerForToolRun] = None,
     ) -> str:
         with self.neo4j_driver.session() as session:
             params = {
-                "section_id": section_id,
+                "id": id,
                 "query_vector": self.embedding_model.embed_query(query),
                 "similarity_threshold": self.similarity_threshold,
                 "top_k": self.top_k
@@ -71,8 +72,8 @@ class SearchChunkTool(BaseTool):
 
     async def _arun(
         self,
-        section_id: str,
+        id: str,
         query: str,
         run_manager: Optional[AsyncCallbackManagerForToolRun] = None
     ) -> str:
-        return self._run(section_id, query)
+        return self._run(id, query)

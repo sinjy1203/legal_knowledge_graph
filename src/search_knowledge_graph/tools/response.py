@@ -9,16 +9,15 @@ from langchain_core.callbacks import (
 
 
 class ResponseInput(BaseModel):
-    chunk_ids: List[str] = Field(
-        description="List of Chunk IDs to fetch final response information for"
+    component_ids: List[str] = Field(
+        description="The component IDs of the lowest-level components in the contract’s table of contents"
     )
 
 
 class ResponseTool(BaseTool):
     name: str = "ResponseTool"
     description: str = (
-        "Given a list of Chunk IDs, return each chunk's file_path and span. "
-        "Purpose: This is the final tool used by the agent to assemble the answer context. "
+        "This tool retrieves the spans of each component ID at the lowest level of a contract’s table of contents. "
         "return_schema: [{‘file_path’: file_path, ‘span’: span}, …]"
     )
     args_schema: Type[BaseModel] = ResponseInput
@@ -30,8 +29,8 @@ class ResponseTool(BaseTool):
     CYPHER_QUERY: str = (
         """
         MATCH (c:Chunk)
-        WHERE c.id IN $chunk_ids
-        RETURN c.file_path AS file_path, c.span AS span
+        WHERE c.id IN $component_ids
+        RETURN c.file_path AS file_path, c.span AS span, c.name AS name, c.content AS content
         """
     )
 
@@ -40,21 +39,33 @@ class ResponseTool(BaseTool):
 
     def _run(
         self,
-        chunk_ids: List[str],
+        component_ids: List[str],
         run_manager: Optional[CallbackManagerForToolRun] = None,
     ) -> str:
         # Query and then reorder results to match input order
         with self.neo4j_driver.session() as session:
-            results = session.run(self.CYPHER_QUERY, {"chunk_ids": chunk_ids})
+            results = session.run(self.CYPHER_QUERY, {"component_ids": component_ids})
             records = [record.data() for record in results]
 
-        return records
+        final_records = []
+
+        for record in records:
+            with open(f"./data/corpus/{record['file_path']}", "r") as f:
+                contract_content = f.read()
+            start_index = contract_content.find(record['content'])
+            end_index = start_index + len(record['content'])
+            if start_index == -1 or end_index == -1:
+                continue
+            record['span'] = [start_index, end_index]
+            final_records.append(record)
+
+        return final_records
 
     async def _arun(
         self,
-        chunk_ids: List[str],
+        component_ids: List[str],
         run_manager: Optional[AsyncCallbackManagerForToolRun] = None,
     ) -> str:
-        return self._run(chunk_ids)
+        return self._run(component_ids)
 
 

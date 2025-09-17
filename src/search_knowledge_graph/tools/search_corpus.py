@@ -9,11 +9,10 @@ from langchain_core.callbacks import (
 
 
 class SearchCorpusTool(BaseTool):
-    name: str = "SearchCorpusTool"
+    name: str = "SearchContractTool"
     description: str = (
-        "This tool searches for the names of contracts stored in the database. "
-        "Purpose: To determine which legal contract(s) should be reviewed in order to answer the user’s question. "
-        "return_schema: [{‘id’: corpus1_id, ‘name’: corpus1_name}, {‘id’: corpus2_id, ‘name’: corpus2_name}, …]"
+        "This tool retrieves the names of all contracts stored in the database. "
+        "return_schema: [{‘contract_id’: contract1_id, ‘contract_name’: contract1_name}, {‘contract_id’: contract2_id, ‘contract_name’: contract2_name}, …]"
     )
     args_schema: Type[BaseModel] = None
     return_direct: bool = True
@@ -23,7 +22,7 @@ class SearchCorpusTool(BaseTool):
 
     CYPHER_QUERY: ClassVar[str] = """
     MATCH (c:Corpus)
-    RETURN c.id AS id, c.name AS name
+    RETURN c.id AS contract_id, c.name AS contract_name
     ORDER BY c.name
     """
 
