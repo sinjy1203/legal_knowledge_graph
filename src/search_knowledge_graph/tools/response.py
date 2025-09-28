@@ -9,15 +9,15 @@ from langchain_core.callbacks import (
 
 
 class ResponseInput(BaseModel):
-    component_ids: List[str] = Field(
-        description="The component IDs of the lowest-level components in the contract’s table of contents"
+    sub_component_ids: List[str] = Field(
+        description="The sub component IDs of the sub components in the contract’s table of contents"
     )
 
 
 class ResponseTool(BaseTool):
     name: str = "ResponseTool"
     description: str = (
-        "This tool retrieves the spans of each component ID at the lowest level of a contract’s table of contents. "
+        "This tool retrieves the spans of each sub component ID at the lowest level of a contract’s table of contents. "
         "return_schema: [{‘file_path’: file_path, ‘span’: span}, …]"
     )
     args_schema: Type[BaseModel] = ResponseInput
@@ -29,7 +29,7 @@ class ResponseTool(BaseTool):
     CYPHER_QUERY: str = (
         """
         MATCH (c:Chunk)
-        WHERE c.id IN $component_ids
+        WHERE c.id IN $sub_component_ids
         RETURN c.file_path AS file_path, c.span AS span, c.name AS name, c.content AS content
         """
     )
@@ -39,12 +39,12 @@ class ResponseTool(BaseTool):
 
     def _run(
         self,
-        component_ids: List[str],
+        sub_component_ids: List[str],
         run_manager: Optional[CallbackManagerForToolRun] = None,
     ) -> str:
         # Query and then reorder results to match input order
         with self.neo4j_driver.session() as session:
-            results = session.run(self.CYPHER_QUERY, {"component_ids": component_ids})
+            results = session.run(self.CYPHER_QUERY, {"sub_component_ids": sub_component_ids})
             records = [record.data() for record in results]
 
         final_records = []
@@ -63,9 +63,9 @@ class ResponseTool(BaseTool):
 
     async def _arun(
         self,
-        component_ids: List[str],
+        sub_component_ids: List[str],
         run_manager: Optional[AsyncCallbackManagerForToolRun] = None,
     ) -> str:
-        return self._run(component_ids)
+        return self._run(sub_component_ids)
 
 

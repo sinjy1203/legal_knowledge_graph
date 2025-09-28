@@ -30,7 +30,7 @@ async def pred(benchmark):
 
     inputs = []
     context = {
-        "max_execute_tool_count": 10,
+        "max_execute_tool_count": 20,
         "progress_bar": progress_bar,
     }
     configs = []
@@ -47,6 +47,7 @@ async def pred(benchmark):
         configs.append(
             {
                 "max_concurrency": 8,
+                "recursion_limit": 100,
                 "callbacks": [langfuse_handler],
                 "metadata": {
                     "benchmark": BENCHMARK_NAME,
@@ -62,18 +63,20 @@ async def pred(benchmark):
 
     qa_results = []
     for test_data, response in zip(benchmark.tests, responses):
+        response_tool_result = []
+        for message in response['messages']:
+            if message.type == "tool" and message.name == "ResponseTool":
+                response_tool_result.extend(json.loads(message.content))
+
         retrieved_snippets = []
-        if response['messages'][-1].type == "ai":
-            pass
-        else:
-            for i, chunk_info in enumerate(json.loads(response['messages'][-1].content)):
-                retrieved_snippets.append(
-                    {
-                        "file_path": chunk_info['file_path'],
-                        "span": chunk_info['span'],
-                        "score": 1.0 / (i + 1)
-                    }
-                )
+        for i, chunk_info in enumerate(response_tool_result):
+            retrieved_snippets.append(
+                {
+                    "file_path": chunk_info['file_path'],
+                    "span": chunk_info['span'],
+                    "score": 1.0 / (i + 1)
+                }
+            )
 
         qa_results.append(
             QAResult(

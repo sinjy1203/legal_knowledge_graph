@@ -21,15 +21,16 @@ neo4j_driver = GraphDatabase.driver(
 agent = ReactAgent(
     model_kwargs={
         "base_url": os.getenv("LLM_BASE_URL"),
-        # "model": os.getenv("LLM_MODEL"),
-        "model": os.getenv("REASONING_LLM_MODEL"),
+        "model": os.getenv("LLM_MODEL"),
+        # "model": os.getenv("REASONING_LLM_MODEL"),
         # "temperature": 0.1,
         "api_key": os.getenv("LLM_API_KEY")
     },
     tools=[
         SearchCorpusTool(neo4j_driver),
         GetCorpusTOCTool(neo4j_driver),
-        SearchChunkTool(neo4j_driver, embedding_model),
+        SearchComponentTool(neo4j_driver, embedding_model),
+        SearchSubComponentTool(neo4j_driver, embedding_model),
         # SearchNeighborChunkTool(neo4j_driver),
         ResponseTool(neo4j_driver)
     ]
